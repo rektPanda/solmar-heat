@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Solmar Heat — an open-world crime story in Solmar City. Steal cars, outrun the police, run the jobs, take the Big Score.">
+<link rel="icon" href="data:,">
+<title>Solmar Heat — an open-world crime story</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; }
+  #game {
+    position: fixed; inset: 0; margin: auto; display: block; touch-action: none;
+    width: min(100vw, calc(100vh * 1280 / 720));
+    height: min(100vh, calc(100vw * 720 / 1280));
+    background: #b8a06a;
+  }
+  /* Read aloud, never shown: the status line screen readers announce. */
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Solmar Heat: an open-world crime game. Drive, steal cars, outrun the police and run the jobs in Solmar City."></canvas>
+<noscript><p style="color:#f2ead8;font:16px system-ui,sans-serif;text-align:center;padding-top:40vh">Solmar Heat needs JavaScript to run — please enable it and reload.</p></noscript>
+<p id="status" role="status" aria-live="polite"></p>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
