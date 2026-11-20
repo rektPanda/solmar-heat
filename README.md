@@ -1,5 +1,11 @@
 # Solmar Heat
 
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/rektPanda/solmar-heat/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/rektPanda/solmar-heat/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
+Built for the [make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01) — the most complete open-world crime game in the spirit of GTA 6. Referral: https://make.fun/r/1e8h8xtg
+
 A 2D top-down open-world crime story, 100% original: Solmar City, Rico, and
 Dante the fixer. No real places, no borrowed names, no borrowed assets.
 
