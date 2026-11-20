@@ -1,35 +1,46 @@
-# solmar-heat
+# Solmar Heat
 
-[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/rektPanda/solmar-heat/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/rektPanda/solmar-heat/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+A 2D top-down open-world crime story, 100% original: Solmar City, Rico, and
+Dante the fixer. No real places, no borrowed names, no borrowed assets.
 
-Solmar Heat is the most complete open-world crime game an agent can build in the spirit of GTA 6: a sun-soaked fictional city to explore on foot and by car, with traffic and pedestrians, cars to steal, a wanted system and police who chase you, four story missions with a fixer named Dante, combat, a HUD with a live minimap, a start screen and a save. Everything in it is original — its own city, names, story, art and sound. No Rockstar Games names, characters, maps or assets.
+## Story
 
-## Run it
+Rico is broke in Solmar City. Dante the fixer has four jobs that add up to
+$1,500 — if the cops don't take it all back first.
 
-```sh
-python3 -m http.server 8080 --directory game
-# then open http://localhost:8080
-```
+1. **Wheels ($150)** — steal any car and deliver it to the Garage.
+2. **The Pickup ($300)** — grab the package at the Docks, deliver it to the
+   Safehouse.
+3. **Heat ($250)** — the same run, but the buyer tipped off the cops.
+4. **The Big Score ($800)** — take the cash from Solmar Central Bank and
+   bring it home.
 
-Play with keyboard and mouse: WASD to walk and drive, E to enter and steal cars, mouse to aim, click to shoot, R to reload, P to pause, M to mute. Finish all four jobs — Wheels, The Pickup, Heat, The Big Score — to complete the story.
-
-## The story
-
-Rico is a driver new to Solmar City, and Dante the fixer has four jobs for him: steal wheels for the garage, pick up a package at the docks, shake the heat after the pickup goes loud, and take the Big Score at Solmar Central Bank. Getting busted costs $150 and whatever the job was carrying — the package or the cash goes back where it came from.
+Finish all four and the city is yours — free roam, keep the money.
 
 ## Controls
 
-| Key | Action |
+| Key / Mouse | Action |
 | --- | --- |
-| WASD / arrows | Walk or drive (hold Shift to sprint on foot) |
-| E | Enter a car, steal a car, grab the package / cash |
-| Mouse + click | Aim and shoot (R reloads) |
-| H | Honk the horn |
-| P / Esc | Pause |
-| M | Mute |
+| WASD / arrows | Walk / drive |
+| Mouse | Aim |
+| Click | Shoot (pistol, 12 rounds) |
+| R | Reload |
+| E | Enter / exit / steal a car |
+| H | Horn |
 
----
+Stealing, shooting, and hitting people raise your wanted level (0–5 stars).
+Police chase, ram, and bust you. Busted or wasted: −$150, goods lost, back
+to the Safehouse. Wanted fades after 20 s without a crime, one star every
+8 s. Progress saves automatically — Continue picks up where you left off.
 
-<sub>Entered on [make.fun](https://make.fun/?ref=1e8h8xtg&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
+## Play
+
+Open `game/index.html` in a desktop browser. No install, no network, no
+account. Sound is synthesized in the browser (WebAudio); there are no audio
+files.
+
+## Tech
+
+Plain ES modules, no libraries, no build step. `main.ts` (Node 22, stdlib
+only) copies `game/` + `screenshots/` to `/output` and writes
+`/output/dossier.json` via the vendored make.fun library.
