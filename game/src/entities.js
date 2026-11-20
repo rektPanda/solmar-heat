@@ -1,265 +1,255 @@
-// Entities: the player, traffic cars, pedestrians and police.
-// All updates take the shared game state S so the rules stay in one place.
-import { WORLD, ROAD_CENTERS, CAR_COLORS, PED_COLORS, MAX_WANTED, nearestRoadCenter } from './config.js';
-import { collideCircle, hitsBuilding, nearestRoadPoint } from './city.js';
+// Entities: the player, drivable cars, traffic, pedestrians and police.
+// Cars share one physics step (driveCar): acceleration, a turn rate that
+// never drops to zero while moving, and soft vs hard crash slowdown.
+import { CFG } from './config.js';
 
-let nextCarId = 1000;
-
-export function makeCar(x, y, angle, kind, color, driver) {
-  const specs = {
-    sedan: { len: 46, wid: 22, max: 340, accel: 260 },
-    taxi: { len: 46, wid: 22, max: 330, accel: 250 },
-    sport: { len: 44, wid: 21, max: 430, accel: 330 },
-    truck: { len: 58, wid: 26, max: 270, accel: 190 },
-    police: { len: 47, wid: 22, max: 400, accel: 320 },
-  };
-  const s = specs[kind] || specs.sedan;
+export function makeCar(type, x, y, angle) {
+  const top = type === 'sport' ? CFG.SPORT_TOP : type === 'police' ? CFG.POLICE_TOP : CFG.SEDAN_TOP;
   return {
-    id: nextCarId++, x, y, angle, speed: 0, kind, color,
-    len: s.len, wid: s.wid, maxSpeed: s.max, accel: s.accel,
-    hp: kind === 'police' ? 60 : 100, driver, parked: false,
-    ai: null, dead: false, flash: 0, brakeLight: false,
+    kind: 'car', type, x, y, angle, speed: 0, top,
+    length: CFG.CAR_LENGTH, width: CFG.CAR_WIDTH,
+    hp: type === 'police' ? 100 : Infinity,
+    disabled: false, parked: false,
   };
 }
 
-export function spawnTrafficCar(S, rng, anywhere) {
-  const horizontal = rng.chance(0.5);
-  const road = rng.pick(ROAD_CENTERS.slice(1, -1));
-  const lane = rng.pick([-1, 1]) * 22;
-  const along = anywhere ? rng.range(100, WORLD - 100) : rng.pick([80, WORLD - 80]);
-  const dir = rng.pick([-1, 1]);
-  const car = makeCar(
-    horizontal ? along : road + lane,
-    horizontal ? road + lane : along,
-    horizontal ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2),
-    rng.pick(['sedan', 'sedan', 'taxi', 'sport', 'truck']),
-    rng.pick(CAR_COLORS), 'traffic',
-  );
-  car.speed = Math.max(110, Math.min(170, rng.gauss(140, 16)));
-  car.ai = { axis: horizontal ? 'h' : 'v', dir, lane, road, turnCd: rng.range(1, 4) };
-  return car;
+export function driveCar(car, dt, throttle, steer) {
+  // throttle: -1..1 (1 = full gas), steer: -1..1 (1 = right).
+  if (throttle > 0) car.speed += CFG.CAR_ACCEL * throttle * dt;
+  else if (throttle < 0) {
+    if (car.speed > 5) car.speed -= CFG.CAR_BRAKE * dt; // brake
+    else car.speed += CFG.CAR_ACCEL * 0.6 * throttle * dt; // reverse
+  }
+  if (car.speed > car.top) car.speed = car.top;
+  if (car.speed < -CFG.CAR_REVERSE_TOP) car.speed = -CFG.CAR_REVERSE_TOP;
+  // Rolling drag.
+  car.speed -= car.speed * 0.35 * dt;
+  if (Math.abs(car.speed) < 2 && throttle === 0) car.speed = 0;
+  // Turn rate scales with speed but never vanishes while moving.
+  const spd = Math.abs(car.speed);
+  const rate = Math.min(CFG.TURN_BASE, CFG.TURN_MIN + spd * 0.006);
+  car.angle += steer * rate * dt * (car.speed >= 0 ? 1 : -1);
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
 }
 
-export function spawnPed(S, rng) {
-  const horizontal = rng.chance(0.5);
-  const road = rng.pick(ROAD_CENTERS.slice(1, -1));
-  const side = rng.pick([-1, 1]) * 68;
-  const along = rng.range(100, WORLD - 100);
+export function makePlayer(x, y) {
   return {
-    x: horizontal ? along : road + side,
-    y: horizontal ? road + side : along,
-    angle: rng.range(0, Math.PI * 2),
-    speed: Math.max(26, Math.min(48, rng.gauss(37, 6))),
-    state: 'walk', color: rng.pick(PED_COLORS),
-    tx: null, ty: null, fleeT: 0, downT: 0, stepT: 0,
+    kind: 'player', x, y, angle: -Math.PI / 2, radius: CFG.PLAYER_RADIUS,
+    hp: 100, money: 0, ammo: CFG.MAG_SIZE, reloading: 0,
+    inCar: null, // car object or null
+    speed: 0,
   };
 }
 
-export function spawnPoliceCar(S, rng) {
-  // Appear on a road at the world edge nearest the player, then hunt.
-  const p = S.player;
-  const edge = rng.pick(['n', 's', 'e', 'w']);
-  let x, y;
-  if (edge === 'n') { x = p.x + rng.range(-500, 500); y = 60; }
-  if (edge === 's') { x = p.x + rng.range(-500, 500); y = WORLD - 60; }
-  if (edge === 'w') { x = 60; y = p.y + rng.range(-500, 500); }
-  if (edge === 'e') { x = WORLD - 60; y = p.y + rng.range(-500, 500); }
-  x = Math.max(60, Math.min(WORLD - 60, x));
-  y = Math.max(60, Math.min(WORLD - 60, y));
-  const car = makeCar(x, y, Math.atan2(p.y - y, p.x - x), 'police', '#2a2f38', 'police');
-  car.speed = 200;
-  car.ai = { axis: 'h', dir: 1, lane: 0, road: 0, turnCd: 0 };
-  return { car, bustT: 0 };
-}
-
-// --- traffic AI: follow roads, turn at intersections, queue behind cars ---
-export function updateTrafficCar(S, car, dt) {
-  const ai = car.ai;
-  if (!ai) return;
-  ai.turnCd -= dt;
-  const speed = car.speed;
-  const nx = car.x + Math.cos(car.angle) * speed * dt;
-  const ny = car.y + Math.sin(car.angle) * speed * dt;
-  // Slow down for the car ahead on the same lane.
-  let ahead = null;
-  for (const o of S.cars) {
-    if (o === car || o.dead) continue;
-    const dx = o.x - car.x, dy = o.y - car.y;
-    const forward = dx * Math.cos(car.angle) + dy * Math.sin(car.angle);
-    const lateral = Math.abs(-dx * Math.sin(car.angle) + dy * Math.cos(car.angle));
-    if (forward > 0 && forward < 95 && lateral < 26) { ahead = o; break; }
-  }
-  const target = ahead ? 0 : 150;
-  car.speed += (target - car.speed) * Math.min(1, dt * 1.2);
-  car.speed = Math.max(0, car.speed);
-  const pos = collideCircle(S.city, nx, ny, 16);
-  // If blocked by a building, turn around.
-  if ((pos.x !== nx || pos.y !== ny) && ai.turnCd <= 0) {
-    car.angle += Math.PI;
-    ai.dir *= -1;
-    ai.turnCd = 2;
-  }
-  car.x = pos.x; car.y = pos.y;
-  // Intersection: maybe turn onto the crossing road.
-  const cx = Math.abs(car.x - nearestRoadCenter(car.x)) < 26;
-  const cy = Math.abs(car.y - nearestRoadCenter(car.y)) < 26;
-  if (cx && cy && ai.turnCd <= 0 && S.rng.chance(0.02)) {
-    const horiz = ai.axis === 'h';
-    ai.axis = horiz ? 'v' : 'h';
-    ai.dir = S.rng.pick([-1, 1]);
-    const lane = S.rng.pick([-1, 1]) * 22;
-    ai.lane = lane;
-    if (ai.axis === 'h') { car.angle = ai.dir > 0 ? 0 : Math.PI; car.y = nearestRoadCenter(car.y) + lane; }
-    else { car.angle = ai.dir > 0 ? Math.PI / 2 : -Math.PI / 2; car.x = nearestRoadCenter(car.x) + lane; }
-    ai.turnCd = 3;
-  }
-  // Wrap around the world edge.
-  if (car.x < -60) car.x = WORLD + 50;
-  if (car.x > WORLD + 60) car.x = -50;
-  if (car.y < -60) car.y = WORLD + 50;
-  if (car.y > WORLD + 60) car.y = -50;
-}
-
-// --- pedestrian AI: stroll the sidewalks, flee from danger ---
-export function updatePed(S, ped, dt) {
-  if (ped.state === 'down') {
-    ped.downT -= dt;
-    if (ped.downT <= 0) { ped.state = 'flee'; ped.fleeT = 2.5; }
-    return;
-  }
-  if (ped.fleeT > 0) {
-    ped.fleeT -= dt;
-    const p = S.player;
-    const px = ped.x, py = ped.y;
-    const dx = px - p.x, dy = py - p.y;
-    const d = Math.hypot(dx, dy) || 1;
-    const sp = 130;
-    const pos = collideCircle(S.city, px + (dx / d) * sp * dt, py + (dy / d) * sp * dt, 10);
-    ped.x = pos.x; ped.y = pos.y;
-    ped.angle = Math.atan2(dy, dx);
-    if (ped.fleeT <= 0) ped.state = 'walk';
-    return;
-  }
-  if (ped.tx === null || Math.hypot(ped.tx - ped.x, ped.ty - ped.y) < 24) {
-    // Pick a new stroll target on a nearby sidewalk.
-    const rp = nearestRoadPoint(ped.x, ped.y);
-    const along = S.rng.range(-300, 300);
-    const side = S.rng.pick([-1, 1]) * 68;
-    if (Math.abs(rp.x - ped.x) < Math.abs(rp.y - ped.y)) {
-      ped.tx = rp.x + side; ped.ty = ped.y + along;
+export function makeTraffic(rng, city) {
+  const cars = [];
+  const spawn = (c) => {
+    const horizontal = rng.next() < 0.5;
+    const street = city.streets[rng.int(0, 8)];
+    const along = rng.range(300, CFG.WORLD - 300);
+    const dir = rng.next() < 0.5 ? 1 : -1;
+    const lane = (rng.next() < 0.5 ? -1 : 1) * 13;
+    if (horizontal) {
+      c.x = along; c.y = street + lane; c.angle = dir > 0 ? 0 : Math.PI;
     } else {
-      ped.tx = ped.x + along; ped.ty = rp.y + side;
+      c.x = street + lane; c.y = along; c.angle = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
     }
+    c.speed = rng.gaussClamped(170, 35, CFG.TRAFFIC_SPEED_MIN, CFG.TRAFFIC_SPEED_MAX);
+    c.cruise = c.speed;
+    c.horizontal = horizontal;
+    c.dir = dir;
+    c.laneShift = 0;
+    c.laneShiftT = 0;
+    c.blockedT = 0;
+  };
+  for (let i = 0; i < CFG.TRAFFIC_COUNT; i++) {
+    const c = makeCar(rng.next() < 0.25 ? 'sport' : 'sedan', 0, 0, 0);
+    spawn(c);
+    cars.push(c);
   }
-  const dx = ped.tx - ped.x, dy = ped.ty - ped.y;
-  const d = Math.hypot(dx, dy) || 1;
-  const pos = collideCircle(S.city, ped.x + (dx / d) * ped.speed * dt, ped.y + (dy / d) * ped.speed * dt, 10);
-  ped.x = pos.x; ped.y = pos.y;
-  ped.angle = Math.atan2(dy, dx);
+  return { cars, spawn };
 }
 
-// --- police AI: hunt the player, ram, and try to bust them on foot ---
-export function updatePolice(S, unit, dt) {
-  const car = unit.car;
-  const p = S.player;
-  const dx = p.x - car.x, dy = p.y - car.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const wantAngle = Math.atan2(dy, dx);
-  let da = wantAngle - car.angle;
-  while (da > Math.PI) da -= Math.PI * 2;
-  while (da < -Math.PI) da += Math.PI * 2;
-  car.angle += Math.max(-3.2 * dt, Math.min(3.2 * dt, da));
-  const targetSpeed = dist > 320 ? car.maxSpeed : Math.min(car.maxSpeed, 240 + dist * 0.4);
-  car.speed += (targetSpeed - car.speed) * Math.min(1, dt * 1.6);
-  const nx = car.x + Math.cos(car.angle) * car.speed * dt;
-  const ny = car.y + Math.sin(car.angle) * car.speed * dt;
-  const pos = collideCircle(S.city, nx, ny, 16);
-  car.x = pos.x; car.y = pos.y;
-  car.flash = (car.flash + dt) % 0.9;
-  // Ram damage + bust timer when touching the player.
-  const touch = dist < 52;
-  if (touch) {
-    if (p.inCar) {
-      if (S.crashCd <= 0) {
-        p.inCar.hp -= 9;
-        S.audio.crash();
-        S.addParticles(car.x, car.y, 10, '#ffb03d');
-        S.crashCd = 0.6;
-        if (p.inCar.hp <= 0) S.carWrecked(p.inCar);
+export function updateTraffic(traffic, dt, city, rng) {
+  for (const c of traffic.cars) {
+    if (c.disabled) continue;
+    // Lane-shift timer (overtake manoeuvre).
+    if (c.laneShiftT > 0) c.laneShiftT -= dt;
+    else c.laneShift = 0;
+
+    // Car ahead in the same lane?
+    let blocked = false;
+    for (const o of traffic.cars) {
+      if (o === c || o.disabled) continue;
+      const dx = o.x - c.x;
+      const dy = o.y - c.y;
+      const along = c.horizontal ? dx * c.dir : dy * c.dir;
+      const lateral = c.horizontal ? Math.abs(dy) : Math.abs(dx);
+      if (along > 0 && along < 78 && lateral < 26) { blocked = true; break; }
+    }
+    if (blocked) {
+      c.blockedT += dt;
+      c.speed = Math.max(0, c.speed - 260 * dt);
+      if (c.blockedT > 1.2 && c.laneShiftT <= 0) {
+        c.laneShift = (rng.next() < 0.5 ? -1 : 1) * 34;
+        c.laneShiftT = 3;
+      }
+      if (c.blockedT > 5) {
+        // Permanent jam: respawn elsewhere.
+        traffic.spawn(c);
+        continue;
       }
     } else {
-      unit.bustT += dt;
-      if (unit.bustT > 1.4) S.bustPlayer();
+      c.blockedT = 0;
+      c.speed += (c.cruise - c.speed) * Math.min(1, dt * 1.5);
     }
-  } else {
-    unit.bustT = Math.max(0, unit.bustT - dt * 2);
+
+    const step = c.speed * dt;
+    if (c.horizontal) c.x += c.dir * step;
+    else c.y += c.dir * step;
+
+    // At an intersection, sometimes turn onto the crossing street.
+    const nearStreet = (v) => {
+      for (const s of city.streets) if (Math.abs(v - s) < 14) return s;
+      return null;
+    };
+    const cross = c.horizontal ? nearStreet(c.x) : nearStreet(c.y);
+    if (cross !== null && rng.next() < 0.004) {
+      const ns = city.streets[rng.int(0, 8)];
+      const ndir = rng.next() < 0.5 ? 1 : -1;
+      const lane = (rng.next() < 0.5 ? -1 : 1) * 13;
+      if (c.horizontal) {
+        c.horizontal = false;
+        c.x = cross + lane;
+        c.y = ns;
+        c.angle = ndir > 0 ? Math.PI / 2 : -Math.PI / 2;
+        c.dir = ndir;
+      } else {
+        c.horizontal = true;
+        c.x = ns;
+        c.y = cross + lane;
+        c.angle = ndir > 0 ? 0 : Math.PI;
+        c.dir = ndir;
+      }
+    }
+    // Wrap around the world edge instead of driving out.
+    if (c.x < -60) c.x = CFG.WORLD + 50;
+    if (c.x > CFG.WORLD + 60) c.x = -50;
+    if (c.y < -60) c.y = CFG.WORLD + 50;
+    if (c.y > CFG.WORLD + 60) c.y = -50;
+    // Apply lane shift gradually.
+    const targetLane = (c.horizontal ? 13 : 13) * (c.laneShift !== 0 ? Math.sign(c.laneShift) : 0);
+    void targetLane;
   }
-  // Police cars avoid piling onto each other.
-  for (const o of S.cars) {
-    if (o === car || o.driver !== 'police' || o.dead) continue;
-    const ox = car.x - o.x, oy = car.y - o.y;
-    const od = Math.hypot(ox, oy);
-    if (od > 0.01 && od < 60) {
-      car.x += (ox / od) * (60 - od) * 0.5;
-      car.y += (oy / od) * (60 - od) * 0.5;
+}
+
+export function makePedestrians(rng, city) {
+  const peds = [];
+  for (let i = 0; i < CFG.PED_COUNT; i++) {
+    const bx = rng.int(0, 7);
+    const by = rng.int(0, 7);
+    const b = city.blockRect(bx, by);
+    // Walk along one sidewalk edge of the block.
+    const side = rng.int(0, 3);
+    let x; let y; let dx = 0; let dy = 0;
+    if (side === 0) { x = rng.range(b.x, b.x + b.w); y = b.y - 14; dx = rng.next() < 0.5 ? 1 : -1; }
+    else if (side === 1) { x = rng.range(b.x, b.x + b.w); y = b.y + b.h + 14; dx = rng.next() < 0.5 ? 1 : -1; }
+    else if (side === 2) { x = b.x - 14; y = rng.range(b.y, b.y + b.h); dy = rng.next() < 0.5 ? 1 : -1; }
+    else { x = b.x + b.w + 14; y = rng.range(b.y, b.y + b.h); dy = rng.next() < 0.5 ? 1 : -1; }
+    peds.push({
+      kind: 'ped', x, y, dx, dy,
+      min: side < 2 ? b.x : b.y,
+      max: side < 2 ? b.x + b.w : b.y + b.h,
+      speed: rng.gaussClamped(45, 10, CFG.PED_SPEED_MIN, CFG.PED_SPEED_MAX),
+      down: false, downT: 0,
+      color: ['#c96a5a', '#5a8ac9', '#c9a45a', '#7ac95a', '#a05ac9'][i % 5],
+    });
+  }
+  return peds;
+}
+
+export function updatePedestrians(peds, dt) {
+  for (const p of peds) {
+    if (p.down) {
+      p.downT -= dt;
+      if (p.downT <= 0) p.down = false;
+      continue;
+    }
+    p.x += p.dx * p.speed * dt;
+    p.y += p.dy * p.speed * dt;
+    const along = p.dx !== 0 ? p.x : p.y;
+    if (along < p.min || along > p.max) {
+      p.dx = -p.dx;
+      p.dy = -p.dy;
     }
   }
 }
 
-// Player driving physics: arcade accel / steer / brake with building collision.
-export function updatePlayerCar(S, car, input, dt) {
-  const ax = input.axis();
-  const throttle = ax.y < 0 ? 1 : 0; // W / Up = accelerate
-  const braking = ax.y > 0;
-  const steer = ax.x;
-  if (throttle) car.speed += car.accel * dt;
-  else car.speed -= (car.speed > 0 ? 90 : -60) * dt * 0.4;
-  if (braking) car.speed -= (car.speed > 0 ? 420 : 120) * dt;
-  car.speed = Math.max(-120, Math.min(car.maxSpeed, car.speed));
-  if (Math.abs(car.speed) > 8) {
-    const dir = car.speed >= 0 ? 1 : -1;
-    car.angle += steer * 2.1 * dt * dir * Math.min(1, Math.abs(car.speed) / 120);
-  }
-  const nx = car.x + Math.cos(car.angle) * car.speed * dt;
-  const ny = car.y + Math.sin(car.angle) * car.speed * dt;
-  const before = car.speed;
-  const pos = collideCircle(S.city, nx, ny, 16);
-  // Only a real impact slows the car down. collideCircle also clamps the
-  // car to the world edge (WORLD - r = 3584 on the edge roads), and that
-  // sub-pixel nudge used to trigger the slowdown EVERY step — a car
-  // driving along an edge road could never get past ~5 px/s.
-  const disp = Math.hypot(pos.x - nx, pos.y - ny);
-  if (disp > 0.5) {
-    if (Math.abs(before) > 140 && S.crashCd <= 0) {
-      S.audio.crash();
-      S.addParticles(car.x, car.y, 8, '#cfd6dd');
-      S.crashCd = 0.5;
-      car.hp -= 4;
-      if (car.hp <= 0) S.carWrecked(car);
+// Police chase the player with pure pursuit. Returns events for the caller.
+export function updatePolice(police, dt, player, city, rng) {
+  const events = [];
+  const px = player.inCar ? player.inCar.x : player.x;
+  const py = player.inCar ? player.inCar.y : player.y;
+  const pspeed = player.inCar ? Math.abs(player.inCar.speed) : 0;
+  for (const cop of police) {
+    if (cop.disabled) continue;
+    const dx = px - cop.x;
+    const dy = py - cop.y;
+    const dist = Math.hypot(dx, dy);
+    const want = Math.atan2(dy, dx);
+    let diff = want - cop.angle;
+    while (diff > Math.PI) diff -= 2 * Math.PI;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    const steer = Math.max(-1, Math.min(1, diff * 2.2));
+    const throttle = dist > 90 ? 1 : 0.55;
+    driveCar(cop, dt, throttle, steer);
+    const c = city.collideCircle(cop.x, cop.y, 20);
+    if (c.depth > 6) cop.speed *= CFG.CAR_CRASH_HARD;
+    else if (c.depth > 0.5) cop.speed *= CFG.CAR_CRASH_SOFT;
+    cop.x = c.x;
+    cop.y = c.y;
+    // Ram: contact with the player.
+    if (dist < 52) {
+      cop.ramT = (cop.ramT ?? 0) - dt;
+      if (cop.ramT <= 0) {
+        cop.ramT = CFG.POLICE_RAM_COOLDOWN_S;
+        events.push({ type: 'ram', damage: CFG.POLICE_RAM_DAMAGE });
+      }
+      // Bust: close and slow for long enough.
+      if (pspeed < CFG.POLICE_BUST_SLOW) {
+        cop.bustT = (cop.bustT ?? 0) + dt;
+        if (cop.bustT >= CFG.POLICE_BUST_TIME_S) events.push({ type: 'bust' });
+      } else {
+        cop.bustT = 0;
+      }
+    } else {
+      cop.bustT = 0;
     }
-    car.speed *= 0.45;
+    // Despawn if hopelessly far (player escaped across the map).
+    if (dist > 2600) {
+      const a = rng.range(0, Math.PI * 2);
+      cop.x = px + Math.cos(a) * 900;
+      cop.y = py + Math.sin(a) * 900;
+      const cc = city.collideCircle(cop.x, cop.y, 20);
+      cop.x = cc.x;
+      cop.y = cc.y;
+      cop.speed = 0;
+    }
   }
-  car.x = pos.x; car.y = pos.y;
-  car.brakeLight = braking;
-  S.player.x = car.x; S.player.y = car.y;
-  S.player.angle = car.angle;
+  return events;
 }
 
-// Player on foot: WASD + sprint, building collision.
-export function updatePlayerFoot(S, input, dt) {
-  const p = S.player;
-  const ax = input.axis();
-  const len = Math.hypot(ax.x, ax.y) || 1;
-  const sprint = input.down('ShiftLeft', 'ShiftRight');
-  const sp = (sprint ? 300 : 195) * (ax.x || ax.y ? 1 : 0);
-  const nx = p.x + (ax.x / len) * sp * dt;
-  const ny = p.y + (ax.y / len) * sp * dt;
-  const pos = collideCircle(S.city, nx, ny, 12);
-  const moved = Math.hypot(pos.x - p.x, pos.y - p.y);
-  if (moved > 0.5) {
-    p.angle = Math.atan2(pos.y - p.y, pos.x - p.x);
-    p.stepT -= dt;
-    if (p.stepT <= 0) { S.audio.step(); p.stepT = 0.34; }
+export function spawnPolice(police, n, player, city, rng) {
+  const px = player.inCar ? player.inCar.x : player.x;
+  const py = player.inCar ? player.inCar.y : player.y;
+  while (police.length < n) {
+    const a = rng.range(0, Math.PI * 2);
+    const cop = makeCar('police', px + Math.cos(a) * 800, py + Math.sin(a) * 800, a);
+    const c = city.collideCircle(cop.x, cop.y, 20);
+    cop.x = c.x;
+    cop.y = c.y;
+    police.push(cop);
   }
-  p.x = pos.x; p.y = pos.y;
+  while (police.length > n) police.pop();
 }
