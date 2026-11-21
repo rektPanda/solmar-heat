@@ -1,21 +1,43 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Solmar Heat — an original open-world crime story game. Steal cars, dodge the cops, run four jobs for Dante and take the Big Score.">
-<link rel="icon" href="data:,">
-<title>Solmar Heat</title>
+<title>Solmar Heat — open-world crime in Solmar City</title>
 <style>
-  html, body { margin: 0; padding: 0; background: #101014; height: 100%; }
-  body { display: flex; align-items: center; justify-content: center; }
-  canvas { display: block; background: #1a1d22; }
-  noscript p { color: #f2ead8; font-family: sans-serif; text-align: center; }
+  body { margin: 0; background: #101418; color: #eee; font-family: system-ui, sans-serif; }
+  #wrap { max-width: 980px; margin: 0 auto; padding: 12px; }
+  h1 { margin: 4px 0 2px; font-size: 26px; color: #ffd700; }
+  h1 span { color: #1e90ff; }
+  p.sub { margin: 0 0 10px; color: #aaa; }
+  canvas { display: block; width: 960px; height: 600px; background: #24401c; border: 2px solid #333; }
+  #status { margin-top: 8px; font-size: 14px; color: #ffd700; min-height: 20px; }
+  .help { margin-top: 10px; font-size: 14px; line-height: 1.6; color: #ccc; }
+  .help b { color: #fff; }
+  kbd { background: #222; border: 1px solid #555; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
 </style>
 </head>
 <body>
-<canvas id="game" width="1280" height="720"></canvas>
-<noscript><p>Solmar Heat needs JavaScript to run.</p></noscript>
-<script type="module" src="./src/main.js"></script>
+<div id="wrap">
+  <h1>SOLMAR <span>HEAT</span></h1>
+  <p class="sub">Open-world crime in the fictional coastal city of Solmar. Original game — no Rockstar / GTA assets.</p>
+  <canvas id="game" width="960" height="600"></canvas>
+  <div id="status"></div>
+  <div class="help">
+    <b>How to play:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys drive / walk,
+    <kbd>Shift</kbd> run, <kbd>Space</kbd> enter or exit a car, <kbd>Enter</kbd> start the next story mission,
+    <kbd>P</kbd> toggle autopilot (demo driver).<br>
+    <b>Goal:</b> finish all 8 story missions for Rico &amp; Dante — deliveries, getaways, a heist —
+    while the Solmar police chase you. Wanted stars rise when you steal cars or hit pedestrians, and fall
+    when you stay out of sight. Get busted on foot or wasted and you lose money and the mission.
+  </div>
+</div>
+<script src="config.js"></script>
+<script src="city.js"></script>
+<script src="entities.js"></script>
+<script src="missions.js"></script>
+<script src="input.js"></script>
+<script src="render.js"></script>
+<script src="main.js"></script>
 </body>
 </html>
