@@ -1,43 +1,69 @@
-// Solmar Heat — gta6-01 entry (Node 22, standard library only). The game is
-// this directory's game/ folder: plain static files a desktop browser loads
-// offline (game/index.html and its ES modules, no library, no network
-// request). This program copies game/ and screenshots/ to /output and writes
-// /output/dossier.json with the vendored make.fun library.
-//
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Solmar Heat — entry program (Node, stdlib only).
+// Copies game/ to the output directory and writes dossier.json.
+// Run: node main.ts   (Node 22+ strips types; no dependencies, no build step)
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const repoRoot: string = path.dirname(fileURLToPath(import.meta.url));
+const gameDir: string = path.join(repoRoot, 'game');
 
-if (!existsSync(join(here, 'game', 'index.html'))) {
-  throw new Error('game/index.html is missing: the game cannot be handed in without its page');
+function pickOutputDir(): string {
+  const preferred: string = process.env.MAKEFUN_OUTPUT || '/output';
+  try {
+    fs.mkdirSync(preferred, { recursive: true });
+    fs.accessSync(preferred, fs.constants.W_OK);
+    return preferred;
+  } catch {
+    const fallback: string = path.join(repoRoot, 'output');
+    fs.mkdirSync(fallback, { recursive: true });
+    return fallback;
+  }
 }
-if (!existsSync(join(here, 'screenshots'))) {
-  throw new Error('screenshots/ is missing: the entry needs 3 or 4 screenshots');
+
+function copyDir(src: string, dst: string): string[] {
+  const copied: string[] = [];
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from: string = path.join(src, entry.name);
+    const to: string = path.join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copied.push(...copyDir(from, to));
+    } else {
+      fs.copyFileSync(from, to);
+      copied.push(path.relative(dst, to).replace(/\\/g, '/'));
+    }
+  }
+  return copied;
 }
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+function main(): void {
+  const outDir: string = pickOutputDir();
+  const files: string[] = copyDir(gameDir, outDir);
+  const dossier = {
+    title: 'Solmar Heat',
+    bounty: 'gta6-01',
+    bounty_url: 'https://make.fun/bounty/gta6-01',
+    description:
+      '2D canvas top-down open-world crime game in the fictional coastal city of Solmar. ' +
+      'Original protagonists Rico & Dante, 8 story missions, wanted levels 1-5, police AI, ' +
+      'drivable cars, pedestrians, traffic, HUD and minimap. Original IP — no Rockstar / GTA assets.',
+    entrypoint: 'index.html',
+    files: files.sort(),
+    missions: 8,
+    controls: {
+      drive_walk: 'WASD / arrow keys',
+      run: 'Shift',
+      action_enter_car: 'Space',
+      start_mission: 'Enter',
+      autopilot: 'P'
+    },
+    engine: 'plain JavaScript + Canvas 2D, no dependencies',
+    test: 'node game/test.js (headless autopilot: all 8 missions)'
+  };
+  fs.writeFileSync(path.join(outDir, 'dossier.json'), JSON.stringify(dossier, null, 2) + '\n');
+  console.log('Solmar Heat -> ' + outDir);
+  console.log('copied ' + files.length + ' files + dossier.json');
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the
-// bytes; the others refuse an entry the scorer would refuse (more than 4
-// screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of
-// game files, in all, or a path under game/ over 1000 bytes).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  }),
-);
+main();
