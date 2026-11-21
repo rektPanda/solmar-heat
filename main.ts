@@ -1,69 +1,40 @@
-// Solmar Heat — entry program (Node, stdlib only).
-// Copies game/ to the output directory and writes dossier.json.
-// Run: node main.ts   (Node 22+ strips types; no dependencies, no build step)
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+// Solmar Heat — entry program (Node 22, standard library only).
+// The game is the plain static files under game/ (game/index.html and its
+// scripts, no network request), plus 3-4 screenshots of the game itself.
+// This program hands the entry in: it copies game/ and screenshots/ from
+// beside this file to /output and writes /output/dossier.json, the summary
+// the judge reads, with the vendored make.fun library.
+//
+// Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
+//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildDossier } from './vendor/makefun-game.ts';
 
-const repoRoot: string = path.dirname(fileURLToPath(import.meta.url));
-const gameDir: string = path.join(repoRoot, 'game');
+const here = fileURLToPath(new URL('.', import.meta.url));
+const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-function pickOutputDir(): string {
-  const preferred: string = process.env.MAKEFUN_OUTPUT || '/output';
-  try {
-    fs.mkdirSync(preferred, { recursive: true });
-    fs.accessSync(preferred, fs.constants.W_OK);
-    return preferred;
-  } catch {
-    const fallback: string = path.join(repoRoot, 'output');
-    fs.mkdirSync(fallback, { recursive: true });
-    return fallback;
-  }
+mkdirSync(out, { recursive: true });
+cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
+mkdirSync(join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
 }
 
-function copyDir(src: string, dst: string): string[] {
-  const copied: string[] = [];
-  fs.mkdirSync(dst, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const from: string = path.join(src, entry.name);
-    const to: string = path.join(dst, entry.name);
-    if (entry.isDirectory()) {
-      copied.push(...copyDir(from, to));
-    } else {
-      fs.copyFileSync(from, to);
-      copied.push(path.relative(dst, to).replace(/\\/g, '/'));
-    }
-  }
-  return copied;
-}
+// The scorer's caps: only text_max_bytes shapes the bytes; the rest refuse
+// an entry the scorer would refuse (more than 4 screenshots or one over
+// 256 KiB; more than 993 files in game/ or 48 MiB of game files in all).
+writeFileSync(
+  join(out, 'dossier.json'),
+  buildDossier(out, {
+    text_max_bytes: 163840,
+    screenshots: { max: 4, max_bytes: 262144 },
+    game_max_files: 993,
+    game_max_bytes: 50331648,
+    game_path_max_bytes: 1000,
+  }),
+);
 
-function main(): void {
-  const outDir: string = pickOutputDir();
-  const files: string[] = copyDir(gameDir, outDir);
-  const dossier = {
-    title: 'Solmar Heat',
-    bounty: 'gta6-01',
-    bounty_url: 'https://make.fun/bounty/gta6-01',
-    description:
-      '2D canvas top-down open-world crime game in the fictional coastal city of Solmar. ' +
-      'Original protagonists Rico & Dante, 8 story missions, wanted levels 1-5, police AI, ' +
-      'drivable cars, pedestrians, traffic, HUD and minimap. Original IP — no Rockstar / GTA assets.',
-    entrypoint: 'index.html',
-    files: files.sort(),
-    missions: 8,
-    controls: {
-      drive_walk: 'WASD / arrow keys',
-      run: 'Shift',
-      action_enter_car: 'Space',
-      start_mission: 'Enter',
-      autopilot: 'P'
-    },
-    engine: 'plain JavaScript + Canvas 2D, no dependencies',
-    test: 'node game/test.js (headless autopilot: all 8 missions)'
-  };
-  fs.writeFileSync(path.join(outDir, 'dossier.json'), JSON.stringify(dossier, null, 2) + '\n');
-  console.log('Solmar Heat -> ' + outDir);
-  console.log('copied ' + files.length + ' files + dossier.json');
-}
-
-main();
+console.log(`Solmar Heat -> ${out}`);
